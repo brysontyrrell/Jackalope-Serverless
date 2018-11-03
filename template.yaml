@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
-Description: A trading card assistant for JNUC 2018
+Description: A Slack bot and notification service for Jamf Pro administrators.
 
 Parameters:
 
@@ -171,7 +171,7 @@ Resources:
     Properties:
       Engine: aurora
       EngineMode: serverless
-      DatabaseName: jamfthegathering
+      DatabaseName: jackalope
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       StorageEncrypted: true
       ScalingConfiguration:
@@ -225,7 +225,7 @@ Resources:
 
 # API Lambda Functions
 
-  SlackEvents:
+  SlackEventsApi:
     Type: AWS::Serverless::Function
     Properties:
       Runtime: python3.6
