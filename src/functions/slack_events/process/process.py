@@ -4,9 +4,6 @@ import re
 import os
 
 from botocore.vendored import requests
-from sqlalchemy import create_engine, or_
-
-from models import Session, SlackTeams, SlackUsers
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

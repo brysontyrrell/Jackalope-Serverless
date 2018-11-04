@@ -10,22 +10,20 @@ from opossum import api
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-CLIENT_ID = os.getenv('CLIENT_ID')
-CLIENT_SECRET = os.getenv('CLIENT_SECRET')
-ENC_KEY_PARAM = os.getenv('ENC_KEY_PARAM')
+
+def get_parameter(name, decrypt=False):
+    ssm_client = boto3.client('ssm')
+    resp = ssm_client.get_parameter(Name=name, WithDecryption=decrypt)
+    return resp['Parameter']['Value']
+
+
+CLIENT_ID = get_parameter(os.getenv('CLIENT_ID_PARAM'))
+CLIENT_SECRET = get_parameter(os.getenv('CLIENT_SECRET_PARAM'), decrypt=True)
 DOMAIN_NAME = os.getenv('DOMAIN_NAME')
 TEAMS_TABLE = os.getenv('TEAMS_TABLE')
 
 dynamodb = boto3.resource('dynamodb')
-
-
-def get_database_key(name):
-    ssm_client = boto3.client('ssm')
-    resp = ssm_client.get_parameter(Name=name, WithDecryption=True)
-    return resp['Parameter']['Value']
-
-
-fernet = Fernet(get_database_key(ENC_KEY_PARAM))
+fernet = Fernet(get_parameter(os.getenv('ENC_KEY_PARAM'), decrypt=True))
 
 
 def save_new_team(token_data):
@@ -77,9 +75,12 @@ def lambda_handler(event, context):
 
     if error:
         print(error)
-        return error, 200
+        return error, 400
 
     access_tokens = get_access_tokens(code)
-    logger.info(f'Obtained access tokens: {access_tokens}')
-    save_new_team(access_tokens)
-    return 'success', 200
+    logger.info(f'Access token request response: {access_tokens}')
+    if access_tokens['ok']:
+        save_new_team(access_tokens)
+        return 'success', 200
+    else:
+        return {'error': access_tokens.get('error')}, 400

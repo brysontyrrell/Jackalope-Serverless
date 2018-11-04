@@ -14,21 +14,22 @@ Parameters:
 
   EncryptionKeyParameter:
     Type: String
-    Description: The alias for the database key stored in parameter store.
+    Description: The alias for the database key stored in parameter store
+    Default: /jackalope/encryptionKey
+
+  SlackClientIdParameter:
+    Type: String
+    Description: The alias for the Slack application's Client ID in parameter store
+    Default: /jackalope/slack/clientId
+
+  SlackClientSecretParameter:
+    Type: String
+    Description: The alias for the Slack application's Client Secret in parameter store
+    Default: /jackalope/slack/clientSecret
 
   KmsKeyId:
     Type: String
     Description: ID of the KMS key to decrypt parameter store values.
-
-  SlackClientId:
-    Type: String
-    Description: The Slack application's Client ID
-    NoEcho: true
-
-  SlackClientSecret:
-    Type: String
-    Description: The Slack application's Client Secret
-    NoEcho: true
 
 Resources:
 
@@ -62,7 +63,10 @@ Resources:
 
 # SNS Topic
 
-  EventsTopic:
+  SlackEventsTopic:
+    Type: AWS::SNS::Topic
+
+  JamFProEventsTopic:
     Type: AWS::SNS::Topic
 
 # Database
@@ -109,7 +113,12 @@ Resources:
       Environment:
         Variables:
           DOMAIN_NAME: !Ref DomainName
-          CLIENT_ID: !Ref SlackClientId
+          CLIENT_ID_PARAM: !Ref SlackClientIdParameter
+      Policies:
+        Statement:
+          - Effect: Allow
+            Action: ssm:GetParameter*
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/jackalope*'
       Events:
         SlackInstall:
           Type: Api
@@ -128,8 +137,8 @@ Resources:
       Environment:
         Variables:
           DOMAIN_NAME: !Ref DomainName
-          CLIENT_ID: !Ref SlackClientId
-          CLIENT_SECRET: !Ref SlackClientSecret
+          CLIENT_ID_PARAM: !Ref SlackClientIdParameter
+          CLIENT_SECRET_PARAM: !Ref SlackClientSecretParameter
           ENC_KEY_PARAM: !Ref EncryptionKeyParameter
           TEAMS_TABLE: !Ref TeamsTable
       Policies:
@@ -153,22 +162,22 @@ Resources:
             Method: get
             RestApiId: !Ref ApiGateway
 
-# API Lambda Functions
+# Slack Event Lambda Functions
 
   SlackEventsApi:
     Type: AWS::Serverless::Function
     Properties:
       Runtime: python3.6
-      CodeUri: ./src/functions/events/api
+      CodeUri: ./src/functions/slack_events/api
       Handler: api.lambda_handler
       Environment:
         Variables:
-          EVENTS_TOPIC: !Ref EventsTopic
+          EVENTS_TOPIC: !Ref SlackEventsTopic
       Policies:
         Statement:
           - Effect: Allow
             Action: sns:Publish
-            Resource: !Ref EventsTopic
+            Resource: !Ref SlackEventsTopic
       Events:
         SlackEvents:
           Type: Api
@@ -177,35 +186,11 @@ Resources:
             Method: post
             RestApiId: !Ref ApiGateway
 
-  SlackInteractionApi:
-    Type: AWS::Serverless::Function
-    Properties:
-      Runtime: python3.6
-      CodeUri: ./src/functions/interaction/api
-      Handler: api.lambda_handler
-      Environment:
-        Variables:
-          EVENTS_TOPIC: !Ref EventsTopic
-      Policies:
-        Statement:
-          - Effect: Allow
-            Action: sns:Publish
-            Resource: !Ref EventsTopic
-      Events:
-        SlackInteraction:
-          Type: Api
-          Properties:
-            Path: /slack/interaction
-            Method: post
-            RestApiId: !Ref ApiGateway
-
-# Event Processing Lambda Functions
-
   SlackEventsProcess:
     Type: AWS::Serverless::Function
     Properties:
       Runtime: python3.6
-      CodeUri: ./src/functions/events/process
+      CodeUri: ./src/functions/slack_events/process
       Handler: process.lambda_handler
       Timeout: 30
       Environment:
@@ -224,4 +209,76 @@ Resources:
         SnsTopic:
           Type: SNS
           Properties:
-            Topic: !Ref EventsTopic
+            Topic: !Ref SlackEventsTopic
+
+# Jamf Pro Event Lambda Functions
+
+  JamfProEventsApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.6
+      CodeUri: ./src/functions/jamfpro_events/api
+      Handler: api.lambda_handler
+      Environment:
+        Variables:
+          JAMFPRO_EVENTS_TOPIC: !Ref JamFProEventsTopic
+      Policies:
+        Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref JamFProEventsTopic
+      Events:
+        SlackEvents:
+          Type: Api
+          Properties:
+            Path: /jamfpro/events/{channel_id}
+            Method: post
+            RestApiId: !Ref ApiGateway
+
+  JamfProEventsProcess:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.6
+      CodeUri: ./src/functions/jamfpro_events/process
+      Handler: process.lambda_handler
+      Timeout: 30
+      Environment:
+        Variables:
+          TEAMS_TABLE: !Ref TeamsTable
+          CHANNELS_TABLE: !Ref ChannelsTable
+      Policies:
+        Statement:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:Query
+          Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChannelsTable}'
+      Events:
+        SnsTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref JamFProEventsTopic
+
+# Slack Interactions Lambda Functions
+
+  SlackInteractionApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.6
+      CodeUri: ./src/functions/interaction/api
+      Handler: api.lambda_handler
+      Environment:
+        Variables:
+          EVENTS_TOPIC: !Ref SlackEventsTopic
+      Policies:
+        Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref SlackEventsTopic
+      Events:
+        SlackInteraction:
+          Type: Api
+          Properties:
+            Path: /slack/interaction
+            Method: post
+            RestApiId: !Ref ApiGateway
