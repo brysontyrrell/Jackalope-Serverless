@@ -1,2 +1,2 @@
-PyMySQL==0.8.1
-SQLAlchemy==1.2.12
+cryptography==2.3.1
+git+https://github.com/brysontyrrell/Opossum.git#egg=opossum

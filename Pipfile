@@ -1,0 +1,14 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+opossum = {git = "https://github.com/brysontyrrell/Opossum.git"}
+"boto3" = "*"
+cryptography = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.6"
