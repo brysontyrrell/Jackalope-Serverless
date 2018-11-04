@@ -201,12 +201,12 @@ Resources:
 
 # Event Processing Lambda Functions
 
-  SlackUserEvents:
+  SlackEventsProcess:
     Type: AWS::Serverless::Function
     Properties:
       Runtime: python3.6
-      CodeUri: ./src/functions/events/user_events
-      Handler: user_events.lambda_handler
+      CodeUri: ./src/functions/events/process
+      Handler: process.lambda_handler
       Timeout: 30
       Environment:
         Variables:
