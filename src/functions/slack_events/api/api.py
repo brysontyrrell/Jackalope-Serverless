@@ -8,7 +8,8 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-EVENTS_TOPIC = os.getenv('EVENTS_TOPIC')
+CHANNEL_EVENTS_TOPIC = os.getenv('CHANNEL_EVENTS_TOPIC')
+USER_EVENTS_TOPIC = os.getenv('USER_EVENTS_TOPIC')
 
 
 def response(message, status_code):
@@ -33,13 +34,25 @@ def response(message, status_code):
     }
 
 
-def process_event(data):
+def challenge_response(challenge):
+    logger.info(f'Sending challenge response: {challenge}')
+    return response({'challenge': challenge}, 200)
+
+
+def process_event(data, event_type):
+    if event_type == 'channel':
+        sns_topic = CHANNEL_EVENTS_TOPIC
+    elif event_type == 'user':
+        sns_topic = USER_EVENTS_TOPIC
+    else:
+        return
+
     sns_client = boto3.client('sns')
     logger.info('Sending Slack event to be processed...')
 
     try:
         sns_client.publish(
-            TopicArn=EVENTS_TOPIC,
+            TopicArn=sns_topic,
             Message=json.dumps(data),
             MessageStructure='string'
         )
@@ -55,22 +68,22 @@ def lambda_handler(event, context):
     logger.info(f'Event Type: {event_type}')
 
     if event_type == 'url_verification':
-        logger.info('Sending challenge response...')
+        return challenge_response(body.get('challenge'))
 
-        challenge = body.get('challenge')
-        logger.info(f'Challenge: {challenge}')
+    if body['event'].get('subtype', '') == 'bot_message':
+        logger.info('Ignoring bot messages...')
+        return response('OK', 200)
 
-        return response({'challenge': challenge}, 200)
+    if event_type == 'event_callback':
+        callback_type = body['event'].get('type')
+        logger.info(f'Received an event: {event_type}/{callback_type}')
 
-    elif event_type == 'event_callback':
-        logger.info('Received an event!')
-        if body['event'].get('subtype', '') == 'bot_message':
-            logger.info('Ignoring bot message...')
-            return response('OK', 200)
+        if callback_type == 'member_joined_channel':
+            pass
 
-        if body['event']['type'] in ('app_mention', 'message'):
-            process_event(body)
+        elif body['event']['type'] in ('app_mention', 'message'):
+            process_event(body, 'user')
             return response('Accepted', 202)
 
-    logger.warning('Bad Request')
+    logger.warning('Unsupported event!')
     return response('Bad Request', 400)

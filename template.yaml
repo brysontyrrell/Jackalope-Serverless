@@ -19,13 +19,18 @@ Parameters:
 
   SlackClientIdParameter:
     Type: String
-    Description: The alias for the Slack application's Client ID in parameter store
+    Description: The alias for the Slack app's Client ID in parameter store
     Default: /jackalope/slack/clientId
 
   SlackClientSecretParameter:
     Type: String
-    Description: The alias for the Slack application's Client Secret in parameter store
+    Description: The alias for the Slack app's Client Secret in parameter store
     Default: /jackalope/slack/clientSecret
+
+  SlackSigningSecretParameter:
+    Type: String
+    Description: The alias for the Slack app's Signing Secret in parameter store
+    Default: /jackalope/slack/signingSecret
 
   KmsKeyId:
     Type: String
@@ -63,7 +68,10 @@ Resources:
 
 # SNS Topic
 
-  SlackEventsTopic:
+  ChannelEventsTopic:
+    Type: AWS::SNS::Topic
+
+  UserEventsTopic:
     Type: AWS::SNS::Topic
 
   JamFProEventsTopic:
@@ -172,12 +180,15 @@ Resources:
       Handler: api.lambda_handler
       Environment:
         Variables:
-          EVENTS_TOPIC: !Ref SlackEventsTopic
+          CHANNEL_EVENTS_TOPIC: !Ref ChannelEventsTopic
+          USER_EVENTS_TOPIC: !Ref UserEventsTopic
       Policies:
         Statement:
           - Effect: Allow
             Action: sns:Publish
-            Resource: !Ref SlackEventsTopic
+            Resource:
+              - !Ref ChannelEventsTopic
+              - !Ref UserEventsTopic
       Events:
         SlackEvents:
           Type: Api
@@ -186,11 +197,40 @@ Resources:
             Method: post
             RestApiId: !Ref ApiGateway
 
-  SlackEventsProcess:
+  ChannelEventsProcess:
     Type: AWS::Serverless::Function
     Properties:
       Runtime: python3.6
-      CodeUri: ./src/functions/slack_events/process
+      CodeUri: ./src/functions/slack_events/channel_process
+      Handler: process.lambda_handler
+      Timeout: 30
+      Environment:
+        Variables:
+          CHANNELS_TABLE: !Ref ChannelsTable
+          SIGNING_SECRET_PARAM: !Ref SlackSigningSecretParameter
+          TEAMS_TABLE: !Ref TeamsTable
+      Policies:
+        Statement:
+        - Effect: Allow
+          Action: dynamodb:GetItem
+          Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TeamsTable}'
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:Query
+            - dynamodb:PutItem
+          Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChannelsTable}'
+      Events:
+        SnsTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref UserEventsTopic
+
+  UserEventsProcess:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.6
+      CodeUri: ./src/functions/slack_events/user_process
       Handler: process.lambda_handler
       Timeout: 30
       Environment:
@@ -199,6 +239,12 @@ Resources:
           CHANNELS_TABLE: !Ref ChannelsTable
       Policies:
         Statement:
+          - Effect: Allow
+            Action: ssm:GetParameter*
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/jackalope*'
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}'
           - Effect: Allow
             Action: dynamodb:GetItem
             Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TeamsTable}'
@@ -209,7 +255,7 @@ Resources:
         SnsTopic:
           Type: SNS
           Properties:
-            Topic: !Ref SlackEventsTopic
+            Topic: !Ref UserEventsTopic
 
 # Jamf Pro Event Lambda Functions
 
@@ -269,12 +315,12 @@ Resources:
       Handler: api.lambda_handler
       Environment:
         Variables:
-          EVENTS_TOPIC: !Ref SlackEventsTopic
+          EVENTS_TOPIC: !Ref UserEventsTopic
       Policies:
         Statement:
           - Effect: Allow
             Action: sns:Publish
-            Resource: !Ref SlackEventsTopic
+            Resource: !Ref UserEventsTopic
       Events:
         SlackInteraction:
           Type: Api

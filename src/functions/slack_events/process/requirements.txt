@@ -1,2 +1,0 @@
-cryptography==2.3.1
-git+https://github.com/brysontyrrell/Opossum.git#egg=opossum
