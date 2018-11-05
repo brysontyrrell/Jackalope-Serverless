@@ -1,6 +1,9 @@
+import hashlib
+import hmac
 import json
 import logging
 import os
+import time
 
 import boto3
 from botocore.exceptions import ClientError
@@ -8,8 +11,38 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
+def get_parameter(name, decrypt=False):
+    ssm_client = boto3.client('ssm')
+    resp = ssm_client.get_parameter(Name=name, WithDecryption=decrypt)
+    return resp['Parameter']['Value']
+
+
+SIGNING_SECRET = get_parameter(os.getenv('SIGNING_SECRET_PARAM'), decrypt=True)
 CHANNEL_EVENTS_TOPIC = os.getenv('CHANNEL_EVENTS_TOPIC')
 USER_EVENTS_TOPIC = os.getenv('USER_EVENTS_TOPIC')
+
+
+def validate_request(event):
+    request_body = event['body']
+    request_timestamp = event['headers']['X-Slack-Request-Timestamp']
+    request_signature = event['headers']['X-Slack-Signature']
+
+    if (int(time.time()) - int(request_timestamp)) > (60 * 5):
+        logger.error('Request timestamp if older than 5 minutes!')
+        return False
+
+    base_string = f'v0:{request_timestamp}:{request_body}'
+
+    generated_sig = 'v0=' + hmac.HMAC(
+        bytes(SIGNING_SECRET, 'utf-8'),
+        bytes(base_string, 'utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    logger.info(f'Request Signature:   {request_signature}\n'
+                f'Generated Signature: {generated_sig}')
+    return hmac.compare_digest(request_signature, generated_sig)
 
 
 def response(message, status_code):
@@ -61,6 +94,11 @@ def process_event(data, event_type):
 
 
 def lambda_handler(event, context):
+    logger.info(event)
+    if not validate_request(event):
+        logger.error('Signature verification on incoming request failed!')
+        return response('Forbidden', 403)
+
     body = json.loads(event['body'])
     logger.info(body)
 
@@ -79,7 +117,8 @@ def lambda_handler(event, context):
         logger.info(f'Received an event: {event_type}/{callback_type}')
 
         if callback_type == 'member_joined_channel':
-            pass
+            process_event(body, 'channel')
+            return response('Accepted', 202)
 
         elif body['event']['type'] in ('app_mention', 'message'):
             process_event(body, 'user')

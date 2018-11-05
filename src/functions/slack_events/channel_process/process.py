@@ -1,10 +1,13 @@
 import json
 import logging
-import re
 import os
+import secrets
+import uuid
 
 import boto3
+from botocore.exceptions import ClientError
 from botocore.vendored import requests
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -16,16 +19,42 @@ def get_parameter(name, decrypt=False):
     return resp['Parameter']['Value']
 
 
-SIGNING_SECRET = get_parameter(os.getenv('SIGNING_SECRET_PARAM'))
+CHANNELS_TABLE = os.getenv('CHANNELS_TABLE')
+TEAMS_TABLE = os.getenv('TEAMS_TABLE')
 
-I_HAVE_RE = re.compile(r'^i\s+have\s+([\d\s]+)(?<!\s)\s*$')
-I_NEED_RE = re.compile(r'^i\s+need\s+([\d\s]+)(?<!\s)\s*$')
-I_TRADED_RE = re.compile(
-    r'^i\s+traded\s+([\d\s]+)(?<!\s)\s+for\s+([\d\s]+)(?<!\s)\s*$')
+dynamodb = boto3.resource('dynamodb')
+fernet = Fernet(get_parameter(os.getenv('ENC_KEY_PARAM'), decrypt=True))
 
 
 class CommandException(Exception):
     pass
+
+
+def save_channel(team_id, channel_id):
+    teams_table = dynamodb.Table(CHANNELS_TABLE)
+
+    endpoint = str(uuid.uuid4())
+    username = secrets.token_hex(8)
+    password = secrets.token_urlsafe(32)
+    try:
+        teams_table.update_item(
+            Key={
+                'team_id': team_id,
+                'channel_id': channel_id
+            },
+            UpdateExpression="set endpoint = :en, "
+                             "credentials.username = :cu,"
+                             "credentials.password = :cp",
+            ExpressionAttributeValues={
+                ':en': endpoint,
+                ':cu': username,
+                ':cp': fernet.encrypt(password.encode())
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+    except ClientError:
+        logger.exception('Unable to write title entry to DynamoDB!')
+        raise
 
 
 def send_chat_message(channel, text, token):
